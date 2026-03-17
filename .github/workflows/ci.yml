@@ -32,7 +32,7 @@ jobs:
       - name: Determine test status
         id: status
         run: |
-          if grep -q "All tests passed" test-output.txt; then
+          if [ "${{ steps.run_tests.outputs.exit_code }}" -eq 0 ]; then
             echo "result=success" >> $GITHUB_OUTPUT
           else
             echo "result=failure" >> $GITHUB_OUTPUT
@@ -51,7 +51,7 @@ jobs:
           STATUS="${{ steps.status.outputs.result }}"
           TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
-          # Build JSON payload safely using jq
+          # Build JSON payload safely using jq and send it
           jq -n \
             --arg status "$STATUS" \
             --arg log "$LOG" \
@@ -72,10 +72,6 @@ jobs:
               -H "Content-Type: application/json" \
               -d @-
 
-          echo "✅ Payload sent to HealBot webhook"
-
       - name: Fail job if tests failed
         if: steps.status.outputs.result == 'failure'
-        run: |
-          echo "❌ Tests failed — HealBot AI has been notified to diagnose and fix."
-          exit 1
+        run: exit 1
