@@ -1,0 +1,850 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>HealBot — AI Auto-Fix Pipeline</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Syne:wght@400;700;800&display=swap" rel="stylesheet"/>
+<style>
+  :root {
+    --bg:        #080c10;
+    --bg2:       #0d1117;
+    --bg3:       #111820;
+    --border:    #1e2d3d;
+    --border2:   #243447;
+    --green:     #00ff88;
+    --green-dim: #00c968;
+    --green-bg:  rgba(0,255,136,0.06);
+    --red:       #ff4d6a;
+    --red-bg:    rgba(255,77,106,0.06);
+    --amber:     #ffb347;
+    --amber-bg:  rgba(255,179,71,0.06);
+    --blue:      #4d9fff;
+    --blue-bg:   rgba(77,159,255,0.06);
+    --text:      #c9d1d9;
+    --text-dim:  #6e7d8f;
+    --text-bright: #e6edf3;
+    --mono:      'Space Mono', monospace;
+    --head:      'Syne', sans-serif;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 13px;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Scanline overlay */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,0,0,0.03) 2px,
+      rgba(0,0,0,0.03) 4px
+    );
+    pointer-events: none;
+    z-index: 1000;
+  }
+
+  /* Corner grid decoration */
+  .grid-bg {
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(0,255,136,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,255,136,0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* ─── HEADER ─── */
+  header {
+    position: relative;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 18px 32px;
+    border-bottom: 1px solid var(--border);
+    background: rgba(8,12,16,0.95);
+    backdrop-filter: blur(8px);
+  }
+
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+
+  .logo-icon {
+    width: 36px;
+    height: 36px;
+    border: 1.5px solid var(--green);
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--green);
+    font-size: 18px;
+    box-shadow: 0 0 12px rgba(0,255,136,0.2);
+    animation: pulse-border 2s ease-in-out infinite;
+  }
+
+  @keyframes pulse-border {
+    0%,100% { box-shadow: 0 0 8px rgba(0,255,136,0.2); }
+    50%      { box-shadow: 0 0 20px rgba(0,255,136,0.4); }
+  }
+
+  .logo h1 {
+    font-family: var(--head);
+    font-size: 22px;
+    font-weight: 800;
+    color: var(--text-bright);
+    letter-spacing: -0.5px;
+  }
+
+  .logo h1 span { color: var(--green); }
+
+  .logo sub {
+    display: block;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-dim);
+    font-weight: 400;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-top: 2px;
+  }
+
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+  }
+
+  .live-badge {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--green-bg);
+    border: 1px solid rgba(0,255,136,0.25);
+    padding: 5px 12px;
+    border-radius: 4px;
+    font-size: 11px;
+    color: var(--green);
+    letter-spacing: 1px;
+  }
+
+  .live-dot {
+    width: 7px;
+    height: 7px;
+    background: var(--green);
+    border-radius: 50%;
+    animation: blink 1s ease-in-out infinite;
+    box-shadow: 0 0 6px var(--green);
+  }
+
+  @keyframes blink {
+    0%,100% { opacity: 1; }
+    50%      { opacity: 0.3; }
+  }
+
+  .clock {
+    font-size: 12px;
+    color: var(--text-dim);
+    font-family: var(--mono);
+  }
+
+  /* ─── MAIN GRID ─── */
+  main {
+    position: relative;
+    z-index: 10;
+    padding: 24px 32px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: auto auto auto;
+    gap: 16px;
+    max-width: 1400px;
+    margin: 0 auto;
+  }
+
+  /* ─── PANEL BASE ─── */
+  .panel {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    transition: border-color 0.3s;
+  }
+
+  .panel:hover { border-color: var(--border2); }
+
+  .panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg3);
+  }
+
+  .panel-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 10px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    font-weight: 700;
+  }
+
+  .panel-title .dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--green);
+  }
+
+  .panel-body { padding: 16px; }
+
+  /* ─── STATUS PANEL (full width) ─── */
+  .panel-status {
+    grid-column: 1 / -1;
+  }
+
+  .status-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+  }
+
+  .stat-box {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 14px 16px;
+  }
+
+  .stat-label {
+    font-size: 9px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin-bottom: 8px;
+  }
+
+  .stat-value {
+    font-family: var(--head);
+    font-size: 26px;
+    font-weight: 800;
+    color: var(--text-bright);
+    line-height: 1;
+  }
+
+  .stat-value.success { color: var(--green); }
+  .stat-value.failure { color: var(--red); }
+  .stat-value.waiting { color: var(--amber); }
+
+  .stat-sub {
+    font-size: 10px;
+    color: var(--text-dim);
+    margin-top: 4px;
+  }
+
+  /* ─── PIPELINE FLOW (full width) ─── */
+  .panel-pipeline {
+    grid-column: 1 / -1;
+  }
+
+  .pipeline-flow {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    padding: 8px 0;
+  }
+
+  .pipe-step {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    position: relative;
+  }
+
+  .pipe-step::after {
+    content: '';
+    position: absolute;
+    right: 0;
+    top: 16px;
+    width: 100%;
+    height: 1px;
+    background: linear-gradient(90deg, var(--border2) 0%, var(--border) 100%);
+    z-index: 0;
+  }
+
+  .pipe-step:last-child::after { display: none; }
+
+  .pipe-icon {
+    width: 34px; height: 34px;
+    border-radius: 50%;
+    border: 1.5px solid var(--border2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg3);
+    font-size: 14px;
+    position: relative;
+    z-index: 1;
+    transition: all 0.4s;
+  }
+
+  .pipe-icon.active {
+    border-color: var(--green);
+    background: var(--green-bg);
+    box-shadow: 0 0 12px rgba(0,255,136,0.3);
+    animation: step-glow 1.5s ease-in-out infinite;
+  }
+
+  .pipe-icon.done {
+    border-color: var(--green);
+    background: var(--green-bg);
+  }
+
+  .pipe-icon.error {
+    border-color: var(--red);
+    background: var(--red-bg);
+  }
+
+  @keyframes step-glow {
+    0%,100% { box-shadow: 0 0 8px rgba(0,255,136,0.2); }
+    50%      { box-shadow: 0 0 18px rgba(0,255,136,0.5); }
+  }
+
+  .pipe-label {
+    font-size: 10px;
+    color: var(--text-dim);
+    text-align: center;
+    letter-spacing: 0.5px;
+  }
+
+  .pipe-label strong {
+    display: block;
+    color: var(--text);
+    font-size: 11px;
+    margin-bottom: 2px;
+  }
+
+  /* ─── ERROR LOG PANEL ─── */
+  .log-body {
+    background: #060a0e;
+    border-radius: 4px;
+    padding: 14px;
+    font-size: 12px;
+    line-height: 1.7;
+    max-height: 280px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+
+  .log-body::-webkit-scrollbar { width: 4px; }
+  .log-body::-webkit-scrollbar-track { background: transparent; }
+  .log-body::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+
+  .log-line-pass { color: var(--green); }
+  .log-line-fail { color: var(--red); }
+  .log-line-info { color: var(--text-dim); }
+  .log-line-normal { color: var(--text); }
+  .log-line-head { color: var(--amber); font-weight: 700; }
+
+  /* ─── AI FIX PANEL ─── */
+  .ai-fix-body {
+    background: #060a0e;
+    border-radius: 4px;
+    padding: 14px;
+    font-size: 12px;
+    line-height: 1.7;
+    max-height: 280px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+    color: var(--blue);
+  }
+
+  .ai-fix-body::-webkit-scrollbar { width: 4px; }
+  .ai-fix-body::-webkit-scrollbar-track { background: transparent; }
+  .ai-fix-body::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+
+  .ai-thinking {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--amber);
+    font-size: 12px;
+  }
+
+  .dots span {
+    animation: dot-bounce 1.2s infinite;
+    display: inline-block;
+  }
+  .dots span:nth-child(2) { animation-delay: 0.2s; }
+  .dots span:nth-child(3) { animation-delay: 0.4s; }
+
+  @keyframes dot-bounce {
+    0%,80%,100% { transform: translateY(0); }
+    40%          { transform: translateY(-4px); }
+  }
+
+  /* ─── HISTORY PANEL (full width) ─── */
+  .panel-history {
+    grid-column: 1 / -1;
+  }
+
+  .history-table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  .history-table th {
+    font-size: 9px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    text-align: left;
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .history-table td {
+    padding: 9px 12px;
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+    color: var(--text);
+    vertical-align: middle;
+  }
+
+  .history-table tr:last-child td { border-bottom: none; }
+  .history-table tr:hover td { background: rgba(255,255,255,0.02); }
+
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+  }
+
+  .badge.success {
+    background: var(--green-bg);
+    border: 1px solid rgba(0,255,136,0.3);
+    color: var(--green);
+  }
+
+  .badge.failure {
+    background: var(--red-bg);
+    border: 1px solid rgba(255,77,106,0.3);
+    color: var(--red);
+  }
+
+  .badge.waiting {
+    background: var(--amber-bg);
+    border: 1px solid rgba(255,179,71,0.3);
+    color: var(--amber);
+  }
+
+  /* ─── COMMIT CHIP ─── */
+  .commit-chip {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 2px 7px;
+    font-size: 11px;
+    font-family: var(--mono);
+    color: var(--blue);
+  }
+
+  /* ─── WAITING STATE ─── */
+  .waiting-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 40px;
+    gap: 12px;
+    color: var(--text-dim);
+  }
+
+  .waiting-state .big-icon {
+    font-size: 36px;
+    opacity: 0.4;
+  }
+
+  .waiting-state p {
+    font-size: 12px;
+    text-align: center;
+    line-height: 1.6;
+  }
+
+  /* ─── FOOTER ─── */
+  footer {
+    position: relative;
+    z-index: 10;
+    text-align: center;
+    padding: 16px;
+    border-top: 1px solid var(--border);
+    font-size: 10px;
+    color: var(--text-dim);
+    letter-spacing: 1px;
+  }
+
+  /* ─── FLASH animation on new data ─── */
+  @keyframes flash-in {
+    0%   { background: rgba(0,255,136,0.12); }
+    100% { background: transparent; }
+  }
+
+  .flash { animation: flash-in 0.8s ease-out; }
+
+  /* ─── TYPEWRITER for AI fix ─── */
+  @keyframes cursor-blink {
+    0%,100% { opacity: 1; }
+    50%      { opacity: 0; }
+  }
+
+  .cursor::after {
+    content: '▋';
+    color: var(--blue);
+    animation: cursor-blink 0.8s infinite;
+    margin-left: 1px;
+  }
+</style>
+</head>
+<body>
+
+<div class="grid-bg"></div>
+
+<!-- HEADER -->
+<header>
+  <div class="logo">
+    <div class="logo-icon">⚕</div>
+    <div>
+      <h1>Heal<span>Bot</span></h1>
+      <sub>AI Auto-Fix Pipeline</sub>
+    </div>
+  </div>
+  <div class="header-right">
+    <div class="live-badge">
+      <div class="live-dot"></div>
+      LIVE
+    </div>
+    <div class="clock" id="clock">--:--:--</div>
+  </div>
+</header>
+
+<!-- MAIN -->
+<main>
+
+  <!-- STATUS STRIP -->
+  <div class="panel panel-status">
+    <div class="panel-header">
+      <div class="panel-title"><div class="dot"></div>Pipeline Status</div>
+      <div id="last-updated" style="font-size:10px;color:var(--text-dim)">Waiting for first run...</div>
+    </div>
+    <div class="panel-body">
+      <div class="status-grid">
+        <div class="stat-box">
+          <div class="stat-label">Latest Run</div>
+          <div class="stat-value" id="stat-status">—</div>
+          <div class="stat-sub" id="stat-commit">no commits yet</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-label">Branch</div>
+          <div class="stat-value" id="stat-branch" style="font-size:18px">—</div>
+          <div class="stat-sub" id="stat-actor">—</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-label">Total Runs</div>
+          <div class="stat-value" id="stat-total">0</div>
+          <div class="stat-sub" id="stat-pass-rate">—</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-label">AI Heals</div>
+          <div class="stat-value" id="stat-heals" style="color:var(--blue)">0</div>
+          <div class="stat-sub">fixes suggested</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- PIPELINE FLOW -->
+  <div class="panel panel-pipeline">
+    <div class="panel-header">
+      <div class="panel-title"><div class="dot"></div>Pipeline Flow</div>
+    </div>
+    <div class="panel-body">
+      <div class="pipeline-flow">
+        <div class="pipe-step">
+          <div class="pipe-icon" id="step-push">⬆</div>
+          <div class="pipe-label"><strong>Git Push</strong>trigger</div>
+        </div>
+        <div class="pipe-step">
+          <div class="pipe-icon" id="step-ci">⚙</div>
+          <div class="pipe-label"><strong>GitHub CI</strong>run tests</div>
+        </div>
+        <div class="pipe-step">
+          <div class="pipe-icon" id="step-fail">✗</div>
+          <div class="pipe-label"><strong>Test Fails</strong>error log</div>
+        </div>
+        <div class="pipe-step">
+          <div class="pipe-icon" id="step-webhook">⇢</div>
+          <div class="pipe-label"><strong>n8n Webhook</strong>receives log</div>
+        </div>
+        <div class="pipe-step">
+          <div class="pipe-icon" id="step-ai">◈</div>
+          <div class="pipe-label"><strong>Ollama AI</strong>diagnoses bug</div>
+        </div>
+        <div class="pipe-step">
+          <div class="pipe-icon" id="step-fix">✓</div>
+          <div class="pipe-label"><strong>Fix Ready</strong>on dashboard</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ERROR LOG -->
+  <div class="panel">
+    <div class="panel-header">
+      <div class="panel-title"><div class="dot" style="background:var(--red)"></div>CI Error Log</div>
+      <div id="log-badge"></div>
+    </div>
+    <div class="panel-body" style="padding:12px">
+      <div class="log-body" id="error-log">
+        <div class="waiting-state">
+          <div class="big-icon">⌛</div>
+          <p>Waiting for CI run...<br/>Push a commit to trigger the pipeline.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- AI FIX -->
+  <div class="panel">
+    <div class="panel-header">
+      <div class="panel-title"><div class="dot" style="background:var(--blue)"></div>HealBot AI Fix</div>
+      <div id="ai-badge"></div>
+    </div>
+    <div class="panel-body" style="padding:12px">
+      <div class="ai-fix-body" id="ai-fix">
+        <div class="waiting-state">
+          <div class="big-icon">◈</div>
+          <p>AI diagnosis will appear here<br/>after the pipeline runs.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- HISTORY -->
+  <div class="panel panel-history">
+    <div class="panel-header">
+      <div class="panel-title"><div class="dot" style="background:var(--amber)"></div>Run History</div>
+    </div>
+    <div class="panel-body" style="padding:0">
+      <table class="history-table">
+        <thead>
+          <tr>
+            <th>Status</th>
+            <th>Commit</th>
+            <th>Branch</th>
+            <th>Pushed by</th>
+            <th>Timestamp</th>
+            <th>AI Fix</th>
+          </tr>
+        </thead>
+        <tbody id="history-body">
+          <tr>
+            <td colspan="6" style="text-align:center;color:var(--text-dim);padding:24px">
+              No runs yet
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</main>
+
+<footer>
+  HEALBOT &nbsp;·&nbsp; AI AUTO-FIX PIPELINE &nbsp;·&nbsp; HACKATHON 2025 &nbsp;·&nbsp; POLLING EVERY 3S
+</footer>
+
+<script>
+  // ─── Clock ───────────────────────────────────────────
+  function updateClock() {
+    const now = new Date();
+    document.getElementById('clock').textContent =
+      now.toTimeString().slice(0, 8);
+  }
+  setInterval(updateClock, 1000);
+  updateClock();
+
+  // ─── State ───────────────────────────────────────────
+  let lastId = null;
+  let historyData = [];
+  let healCount = 0;
+
+  // ─── Colorize log lines ──────────────────────────────
+  function colorizeLog(text) {
+    return text.split('\n').map(line => {
+      if (line.includes('✓') || line.includes('passed') || line.includes('All tests')) {
+        return `<span class="log-line-pass">${escHtml(line)}</span>`;
+      } else if (line.includes('✗') || line.includes('fail') || line.includes('Error') || line.includes('❌')) {
+        return `<span class="log-line-fail">${escHtml(line)}</span>`;
+      } else if (line.startsWith('#') || line.includes('Running') || line.includes('🧪')) {
+        return `<span class="log-line-head">${escHtml(line)}</span>`;
+      } else if (line.includes('Expected') || line.includes('Received')) {
+        return `<span class="log-line-info">${escHtml(line)}</span>`;
+      }
+      return `<span class="log-line-normal">${escHtml(line)}</span>`;
+    }).join('\n');
+  }
+
+  function escHtml(s) {
+    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  // ─── Update pipeline step states ─────────────────────
+  function setPipelineState(status) {
+    const steps = ['step-push','step-ci','step-fail','step-webhook','step-ai','step-fix'];
+    steps.forEach(id => {
+      const el = document.getElementById(id);
+      el.className = 'pipe-icon';
+    });
+
+    if (!status || status === 'waiting') return;
+
+    // Always: push → ci → fail/pass → webhook → ai → fix
+    const doneSteps = status === 'failure'
+      ? ['step-push','step-ci','step-fail','step-webhook','step-ai','step-fix']
+      : ['step-push','step-ci'];
+
+    doneSteps.forEach((id, i) => {
+      const el = document.getElementById(id);
+      if (i === doneSteps.length - 1) {
+        el.className = 'pipe-icon ' + (status === 'failure' ? 'done' : 'done');
+      } else {
+        el.className = 'pipe-icon done';
+      }
+    });
+
+    if (status === 'failure') {
+      document.getElementById('step-fail').className = 'pipe-icon error';
+    }
+  }
+
+  // ─── Render latest result ────────────────────────────
+  function renderResult(data) {
+    if (data.waiting) return;
+
+    const isNew = data.id !== lastId;
+    if (isNew) lastId = data.id;
+
+    // Status strip
+    const statusEl = document.getElementById('stat-status');
+    statusEl.textContent = data.status === 'success' ? 'PASS' : data.status === 'failure' ? 'FAIL' : '?';
+    statusEl.className = 'stat-value ' + (data.status === 'success' ? 'success' : 'failure');
+
+    document.getElementById('stat-commit').textContent = '⬡ ' + (data.commit || 'unknown');
+    document.getElementById('stat-branch').textContent = data.branch || '—';
+    document.getElementById('stat-actor').textContent = '@' + (data.actor || 'unknown');
+
+    const ts = data.timestamp ? new Date(data.timestamp).toLocaleTimeString() : '';
+    document.getElementById('last-updated').textContent = 'Last run: ' + ts;
+
+    // Pipeline
+    setPipelineState(data.status);
+
+    // Error log
+    const logEl = document.getElementById('error-log');
+    logEl.innerHTML = colorizeLog(data.error_log || '(no log)');
+    if (isNew) { logEl.classList.add('flash'); setTimeout(() => logEl.classList.remove('flash'), 800); }
+
+    // AI fix
+    const fixEl = document.getElementById('ai-fix');
+    if (data.ai_fix && data.ai_fix !== 'No fix provided') {
+      fixEl.innerHTML = escHtml(data.ai_fix);
+      if (isNew) {
+        fixEl.classList.add('flash');
+        setTimeout(() => fixEl.classList.remove('flash'), 800);
+        healCount++;
+        document.getElementById('stat-heals').textContent = healCount;
+      }
+    } else if (data.status === 'failure') {
+      fixEl.innerHTML = '<div class="ai-thinking">◈ HealBot is analyzing<span class="dots"><span>.</span><span>.</span><span>.</span></span></div>';
+    } else {
+      fixEl.innerHTML = '<span style="color:var(--green)">✓ No fix needed — all tests passed!</span>';
+    }
+  }
+
+  // ─── Render history ──────────────────────────────────
+  function renderHistory(runs) {
+    const tbody = document.getElementById('history-body');
+    if (!runs || runs.length === 0) return;
+
+    const passes = runs.filter(r => r.status === 'success').length;
+    document.getElementById('stat-total').textContent = runs.length;
+    document.getElementById('stat-pass-rate').textContent =
+      Math.round((passes / runs.length) * 100) + '% pass rate';
+
+    tbody.innerHTML = runs.map(r => {
+      const ts = r.timestamp ? new Date(r.timestamp).toLocaleString() : '—';
+      const hasFix = r.ai_fix && r.ai_fix !== 'No fix provided';
+      return `
+        <tr>
+          <td><span class="badge ${r.status === 'success' ? 'success' : 'failure'}">${r.status === 'success' ? '✓ PASS' : '✗ FAIL'}</span></td>
+          <td><span class="commit-chip">${escHtml(r.commit || '?')}</span></td>
+          <td>${escHtml(r.branch || '?')}</td>
+          <td style="color:var(--text-dim)">@${escHtml(r.actor || '?')}</td>
+          <td style="color:var(--text-dim)">${ts}</td>
+          <td><span class="badge ${hasFix ? 'waiting' : 'success'}">${hasFix ? '⚕ HEALED' : r.status === 'success' ? '—' : '⌛ PENDING'}</span></td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  // ─── Poll loop ───────────────────────────────────────
+  async function poll() {
+    try {
+      const [resultRes, historyRes] = await Promise.all([
+        fetch('/result'),
+        fetch('/history')
+      ]);
+      const result = await resultRes.json();
+      const history = await historyRes.json();
+
+      renderResult(result);
+      renderHistory(history);
+    } catch (e) {
+      // Server might not be running — silently ignore
+    }
+  }
+
+  poll();
+  setInterval(poll, 3000);
+</script>
+</body>
+</html>
